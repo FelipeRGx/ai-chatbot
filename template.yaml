@@ -1,0 +1,359 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  AppName:
+    Type: String
+    Default: "example.com"
+    Description: Name of the app in S3 bucket to create
+  Stage:
+    Type: String
+    Default: "dev"
+    Description: Stage to deploy to
+  StackName:
+    Type: String
+    Default: "new-example-app"
+    Description: Name of the stack
+  Region:
+    Type: String
+    Default: "us-east-1"
+    Description: Region to deploy to
+    AllowedValues:
+      - "us-east-1"
+      - "us-east-2"
+      - "us-west-1"
+      - "us-west-2"
+      - "ap-south-1"
+      - "ap-northeast-2"
+      - "ap-southeast-1"
+      - "ap-southeast-2"
+      - "ap-northeast-1"
+      - "ca-central-1"
+      - "eu-central-1"
+      - "eu-west-1"
+      - "eu-west-2"
+      - "sa-east-1"
+  UseCustomDomain:
+    Description: "Indicates whether to use a custom domain or not."
+    Type: String
+    Default: "no"
+    AllowedValues:
+      - "yes"
+      - "no"
+
+Conditions:
+  CreateCustomDomainResources: !Equals [!Ref UseCustomDomain, "yes"]
+  IsProdStage: !Equals [ !Ref Stage, "prod" ]
+
+Resources:
+  HostedZone:
+    Condition: CreateCustomDomainResources
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !If [IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}"]
+  Certificate:
+    Condition: CreateCustomDomainResources
+    DependsOn: HostedZone
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !If [IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}"]
+      SubjectAlternativeNames:
+        - !If [IsProdStage, !Sub "*.${AppName}", !Sub "*.${Stage}.${AppName}"]
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !If [IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}"]
+          ValidationDomain: !If [IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}"]
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Stage}-${AppName}-Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - apigateway.amazonaws.com
+                - cognito-idp.amazonaws.com
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:CreateQueue
+                  - sqs:DeleteMessage
+                  - sqs:ReceiveMessage
+                  - sqs:GetQueueAttributes
+                Resource: "arn:aws:sqs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:PutBucketPolicy
+                  - s3:GetBucketPolicy
+                  - s3:PutObjectAcl
+                Resource:
+                  - arn:aws:s3:::*
+                  - arn:aws:s3:::*/*
+              - Effect: Allow
+                Action:
+                  - textract:AnalyzeDocument
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - execute-api:ManageConnections
+                Resource:
+                  - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:*/@connections/*
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - arn:aws:bedrock:us-east-1::foundation-model/meta.llama3-8b-instruct-v1:0
+                  - arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:AddTagsToResource
+                  - ssm:RemoveTagsFromResource
+                Resource: "arn:aws:ssm:*:*:parameter/*"
+
+  APIDomain:
+    Condition: CreateCustomDomainResources
+    DependsOn: Role
+    Type: AWS::ApiGateway::DomainName
+    Properties:
+      CertificateArn: !Ref Certificate
+      DomainName: !If [IsProdStage, !Sub "api.${AppName}", !Sub "api.${Stage}.${AppName}"]
+  APIDomainRecord:
+    Condition: CreateCustomDomainResources
+    DependsOn: APIDomain
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !GetAtt HostedZone.Id
+      RecordSets:
+        - Name: !If [IsProdStage, !Sub "api.${AppName}", !Sub "api.${Stage}.${AppName}"]
+          Type: A
+          AliasTarget:
+            HostedZoneId: Z2FDTNDATAQYW2
+            DNSName: !GetAtt APIDomain.DistributionDomainName
+
+  APPBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+      WebsiteConfiguration:
+        ErrorDocument: 404.html
+        IndexDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        IgnorePublicAcls: false
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      BucketName: !If [ IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}" ]
+
+  APPBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref APPBucket
+      PolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !If [ IsProdStage, !Sub "arn:aws:s3:::${AppName}/*", !Sub "arn:aws:s3:::${Stage}.${AppName}/*" ]
+
+  CloudfrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Comment: Frontend
+        HttpVersion: http2
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt APPBucket.DomainName
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          Compress: true
+          ForwardedValues:
+            Cookies:
+              Forward: "none"
+            QueryString: false
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: "redirect-to-https"
+          AllowedMethods:
+            - GET
+            - HEAD
+          CachedMethods:
+            - GET
+            - HEAD
+        Aliases:
+          - !If [ CreateCustomDomainResources, !If [ IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}" ], !Ref AWS::NoValue ]
+        Enabled: true
+        DefaultRootObject: index.html
+        ViewerCertificate:
+          SslSupportMethod: !If [ CreateCustomDomainResources, "sni-only", !Ref AWS::NoValue ]
+          CloudFrontDefaultCertificate: !If [ CreateCustomDomainResources, !Ref AWS::NoValue, true ]
+          AcmCertificateArn: !If [ CreateCustomDomainResources, !Ref Certificate, !Ref AWS::NoValue ]
+
+  APPDomainRecord:
+    Condition: CreateCustomDomainResources
+    DependsOn: CloudfrontDistribution
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !GetAtt HostedZone.Id
+      RecordSets:
+        - Name: !If [ IsProdStage, !Ref AppName, !Sub "${Stage}.${AppName}" ]
+          Type: A
+          AliasTarget:
+            HostedZoneId: Z2FDTNDATAQYW2
+            DNSName: !GetAtt CloudfrontDistribution.DomainName
+
+  VPC:
+    DependsOn: Role
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./VPC.yaml
+
+  Deactivator:
+    DependsOn:
+      - VPC
+      - APIDomainRecord
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./Deactivator/infrastructure/aws.template
+
+  ETL:
+    DependsOn:
+      - VPC
+      - APIDomainRecord
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./ETL/infrastructure/aws.template
+
+  Chatbot:
+    DependsOn:
+      - VPC
+      - APIDomainRecord
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./Chatbot/infrastructure/aws.template
+
+  Messages:
+    DependsOn:
+      - VPC
+      - APIDomainRecord
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./Messages/infrastructure/aws.template
+
+  Notification:
+    DependsOn:
+      - VPC
+      - APIDomainRecord
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./Notification/infrastructure/aws.template
+
+  POC:
+    DependsOn:
+      - VPC
+      - APIDomainRecord
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Stage: !Ref Stage
+        Region: !Ref Region
+        AppName: !Ref AppName
+        Role: !GetAtt Role.Arn
+        StackName: !Ref StackName
+        UseCustomDomain: !Ref UseCustomDomain
+      TemplateURL: ./POC/infrastructure/aws.template
