@@ -1,0 +1,15 @@
+{
+  "version": "0.0.0",
+  "npmClient": "yarn",
+  "packages": [
+    "./",
+    "app",
+    "Chatbot/infrastructure",
+    "Dashboard/infrastructure",
+    "Deactivate/infrastructure",
+    "ETL/infrastructure",
+    "Messages/infrastructure",
+    "Notification/infrastructure",
+    "POC/infrastructure"
+  ]
+}

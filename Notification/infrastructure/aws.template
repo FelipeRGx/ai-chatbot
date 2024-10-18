@@ -1,0 +1,266 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Transform": "AWS::Serverless-2016-10-31",
+  "Description": "API Notification nested application",
+  "Parameters": {
+    "AppName": {
+      "Type": "String",
+      "Default": "example.com",
+      "Description": "Domain app"
+    },
+    "Stage": {
+      "Default": "dev",
+      "Type": "String",
+      "Description": "Stage to deploy to"
+    },
+    "Region": {
+      "Type": "String",
+      "Default": "us-east-1",
+      "AllowedValues": [
+        "us-east-1",
+        "us-east-2",
+        "us-west-1",
+        "us-west-2",
+        "ap-south-1",
+        "ap-northeast-2",
+        "ap-southeast-1",
+        "ap-southeast-2",
+        "ap-northeast-1",
+        "ca-central-1",
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-2",
+        "sa-east-1"
+      ],
+      "Description": "Region to deploy to"
+    },
+    "Role": {
+      "Type": "String",
+      "Description": "ARN Role"
+    },
+    "StackName": {
+      "Type": "String",
+      "Description": "Name of the stack"
+    },
+    "UseCustomDomain": {
+      "Default": "no",
+      "Type": "String",
+      "Description": "Set to 'true' to use a custom domain"
+    }
+  },
+  "Globals": {
+    "Function": {
+      "Timeout": 900,
+      "MemorySize": 3008,
+      "Environment": {
+        "Variables": {
+          "ORIGINS": "Origin",
+          "APP_DOMAIN": {
+            "Ref": "AppName"
+          },
+          "STACK_NAME": {
+            "Ref": "StackName"
+          },
+          "NOTIFICATION_TABLE": {
+            "Fn::Sub": "${StackName}-Notification"
+          }
+        }
+      },
+      "VpcConfig": {
+        "SecurityGroupIds": [
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${StackName}-vpc-sg"
+            }
+          }
+        ],
+        "SubnetIds": [
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${StackName}-private-subnet-a"
+            }
+          },
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${StackName}-private-subnet-b"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Conditions": {
+    "UseCustomDomain": {
+      "Fn::Equals": [
+        {
+          "Ref": "UseCustomDomain"
+        },
+        "yes"
+      ]
+    },
+    "IsProdStage": {
+      "Fn::Equals": [
+        {
+          "Ref": "Stage"
+        },
+        "prod"
+      ]
+    }
+  },
+  "Resources": {
+    "Api": {
+      "Type": "AWS::Serverless::Api",
+      "Properties": {
+        "StageName": {
+          "Ref": "Stage"
+        },
+        "Name": {
+          "Fn::Sub": "${StackName}-notification"
+        }
+      }
+    },
+    "Mapping": {
+      "Condition": "UseCustomDomain",
+      "DependsOn": ["Api"],
+      "Type": "AWS::ApiGateway::BasePathMapping",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "Api"
+        },
+        "Stage": {
+          "Ref": "Api.Stage"
+        },
+        "BasePath": "notification",
+        "DomainName": {
+          "Fn::If": [
+            "IsProdStage",
+            {
+              "Fn::Sub": "api.${AppName}"
+            },
+            {
+              "Fn::Sub": "api.${Stage}.${AppName}"
+            }
+          ]
+        }
+      }
+    },
+    "EmailQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "VisibilityTimeout": 900,
+        "QueueName": {
+          "Fn::Sub": "${StackName}-EmailQueue"
+        }
+      }
+    },
+    "BatchEmail": {
+      "DependsOn": "EmailQueue",
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "Role": {
+          "Ref": "Role"
+        },
+        "Runtime": "nodejs18.x",
+        "Handler": "indexMin.handler",
+        "CodeUri": "../application/batchEmail",
+        "FunctionName": {
+          "Fn::Sub": "${StackName}-BatchEmail"
+        },
+        "Environment": {
+          "Variables": {
+            "QUEUE_URL": {
+              "Ref": "EmailQueue"
+            }
+          }
+        },
+        "Events": {
+          "api": {
+            "Type": "Api",
+            "Properties": {
+              "Path": "/email",
+              "Method": "post",
+              "RestApiId": {
+                "Ref": "Api"
+              }
+            }
+          }
+        }
+      }
+    },
+    "SendEmail": {
+      "DependsOn": "EmailQueue",
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "Role": {
+          "Ref": "Role"
+        },
+        "Runtime": "nodejs18.x",
+        "Handler": "indexMin.handler",
+        "CodeUri": "../application/sendEmail",
+        "FunctionName": {
+          "Fn::Sub": "${StackName}-SendEmail"
+        }
+      }
+    },
+    "EmailQueueEvent": {
+      "DependsOn": "SendEmail",
+      "Type": "AWS::Lambda::EventSourceMapping",
+      "Properties": {
+        "Enabled": true,
+        "FunctionName": {
+          "Fn::GetAtt": ["SendEmail", "Arn"]
+        },
+        "EventSourceArn": {
+          "Fn::GetAtt": ["EmailQueue", "Arn"]
+        }
+      }
+    },
+
+    "Table": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": {
+          "Fn::Sub": "${StackName}-Notification"
+        },
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "createdAt",
+            "AttributeType": "N"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "IdAndCreatedAtIndex",
+            "KeySchema": [
+              {
+                "AttributeName": "id",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "createdAt",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST",
+        "SSESpecification": {
+          "SSEEnabled": false
+        }
+      }
+    }
+  }
+}

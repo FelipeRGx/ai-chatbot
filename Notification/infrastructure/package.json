@@ -1,0 +1,28 @@
+{
+  "private": true,
+  "license": "MIT",
+  "version": "1.0.0",
+  "main": "README.md",
+  "name": "notification",
+  "author": "<Henmanuel Vargas Ugalde> <henmanuelvargas@gmail.com>",
+  "workspaces": [
+    "./"
+  ],
+  "scripts": {
+    "deploy": "npm-run-all build:prod-*",
+    "building": "webpack --config ../../webpack.config.js",
+    "Notification": "sam local start-api -d 5858 -t aws.template",
+    "InvokeSendEmail": "sam local invoke SendEmail -d 5858 -t aws.template -e event.json",
+
+    "build:prod-Notification-batchEmail": "yarn run building --mode production --env route=./ --env component=Notification/application/batchEmail/index.ts",
+    "build:dev-Notification-batchEmail": "yarn run building --mode development --env route=./ --env component=Notification/application/batchEmail/index.ts --watch",
+
+    "build:prod-Notification-sendEmail": "yarn run building --mode production --env route=./ --env component=Notification/application/sendEmail/index.ts",
+    "build:dev-Notification-sendEmail": "yarn run building --mode development --env route=./ --env component=Notification/application/sendEmail/index.ts --watch"
+  },
+  "devDependencies": {
+    "lerna": "^7.2.0",
+    "npm-run-all": "^4.1.5",
+    "webpack": "^5.88.2"
+  }
+}

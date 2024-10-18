@@ -1,0 +1,20 @@
+{
+  "Records": [
+    {
+      "messageId": "134a05cc-488e-44fe-8c0d-61c22ddb6c85",
+      "receiptHandle": "AQEBmxqt24JNgz+yb7r5OR0GAg5UTN6NIoTjBk84vhcN1Azpaki/k4ipEBJYp5fkbrc3P1JcwHV52i7x32PBh2OYuSOxZX9G/pP22N6cmivvysRJsJ2yrNNtzqxhajbxGLnr4lSnSf1cQa47faaW3oSJIwG40UwyfEyjtZU+CXNxAXAsjzZPZsiyWsrd5QnyhzGsmgKaV37zb+LyqktSCh0QV5cyazvFQwK3vO2V6ONu4PUUEhmVtHvfs2RnthDStMeekd9hvQE4BNKGovqXZbGHZS2US4OOmbK21IJgUzkk4fvoY6FrNFB6W6bx809GU9Cs/IX+sfIQRMXoT8LDXl3cri0VifHaJZpQdz7CM8sWHzNqukELpv1tMt11VySC1Gg9",
+      "body": "{\"to\":[\"henmanuelvargas@gmail.com\"],\"from\":\"henmanuelvargas@gmail.com\",\"data\":{\"TXT\":\"Hello World A2C\"},\"subject\":\"Hello World\",\"replyTo\":[\"henmanuelvargas@gmail.com\"],\"templateName\":\"notificationEmail\",\"notificationId\":\"ef3fadbb-49e1-46b1-9b24-f0585815e23d\"}",
+      "attributes": {
+        "ApproximateReceiveCount": "1",
+        "SentTimestamp": "1616270723814",
+        "SenderId": "AROAU6MGD6CU2LG4YEJOS:a2cBatchEmail",
+        "ApproximateFirstReceiveTimestamp": "1616270723817"
+      },
+      "messageAttributes": {},
+      "md5OfBody": "66139937adc7905063fbb1fdc9c2e6d6",
+      "eventSource": "aws:sqs",
+      "eventSourceARN": "arn:aws:sqs:us-east-1:340120563881:a2cEmailQueue",
+      "awsRegion": "us-east-1"
+    }
+  ]
+}

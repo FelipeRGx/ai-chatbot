@@ -1,0 +1,455 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Transform": "AWS::Serverless-2016-10-31",
+  "Description": "API Messages nested application",
+  "Parameters": {
+    "AppName": {
+      "Type": "String",
+      "Default": "example.com",
+      "Description": "Domain app"
+    },
+    "Stage": {
+      "Default": "dev",
+      "Type": "String",
+      "Description": "Stage to deploy to"
+    },
+    "Region": {
+      "Type": "String",
+      "Default": "us-east-1",
+      "AllowedValues": [
+        "us-east-1",
+        "us-east-2",
+        "us-west-1",
+        "us-west-2",
+        "ap-south-1",
+        "ap-northeast-2",
+        "ap-southeast-1",
+        "ap-southeast-2",
+        "ap-northeast-1",
+        "ca-central-1",
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-2",
+        "sa-east-1"
+      ],
+      "Description": "Region to deploy to"
+    },
+    "Role": {
+      "Type": "String",
+      "Description": "ARN Role"
+    },
+    "StackName": {
+      "Type": "String",
+      "Description": "Name of the stack"
+    },
+    "UseCustomDomain": {
+      "Default": "no",
+      "Type": "String",
+      "Description": "Set to 'true' to use a custom domain"
+    }
+  },
+  "Globals": {
+    "Function": {
+      "Timeout": 900,
+      "MemorySize": 3008,
+      "Environment": {
+        "Variables": {
+          "ORIGINS": "Origins",
+          "REGION": {
+            "Ref": "Region"
+          },
+          "APP_DOMAIN": {
+            "Ref": "AppName"
+          },
+          "STACK_NAME": {
+            "Ref": "StackName"
+          },
+          "NO_REPLY_EMAIL": "NoReplyEmail",
+
+          "MESSAGE_TABLE": {
+            "Fn::Sub": "${StackName}-Messages"
+          },
+
+          "CONVERSATION_TABLE": {
+            "Fn::Sub": "${StackName}-Conversation"
+          }
+        }
+      },
+      "VpcConfig": {
+        "SecurityGroupIds": [
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${StackName}-vpc-sg"
+            }
+          }
+        ],
+        "SubnetIds": [
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${StackName}-private-subnet-a"
+            }
+          },
+          {
+            "Fn::ImportValue": {
+              "Fn::Sub": "${StackName}-private-subnet-b"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Conditions": {
+    "UseCustomDomain": {
+      "Fn::Equals": [
+        {
+          "Ref": "UseCustomDomain"
+        },
+        "yes"
+      ]
+    },
+    "IsProdStage": {
+      "Fn::Equals": [
+        {
+          "Ref": "Stage"
+        },
+        "prod"
+      ]
+    }
+  },
+  "Resources": {
+    "Api": {
+      "Type": "AWS::Serverless::Api",
+      "Properties": {
+        "StageName": {
+          "Ref": "Stage"
+        },
+        "Name": {
+          "Fn::Sub": "StackName"
+        }
+      }
+    },
+    "Mapping": {
+      "Condition": "UseCustomDomain",
+      "DependsOn": "Api",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "Api"
+        },
+        "Stage": {
+          "Ref": "Api.Stage"
+        },
+        "BasePath": "messages",
+        "DomainName": {
+          "Fn::If": [
+            "IsProdStage",
+            {
+              "Fn::Sub": "api.${AppName}"
+            },
+            {
+              "Fn::Sub": "api.${Stage}.${AppName}"
+            }
+          ]
+        }
+      },
+      "Type": "AWS::ApiGateway::BasePathMapping"
+    },
+
+    "GetConversations": {
+      "Type": "AWS::Serverless::Function",
+      "Properties": {
+        "Role": {
+          "Ref": "Role"
+        },
+        "Runtime": "nodejs18.x",
+        "Handler": "indexMin.handler",
+        "CodeUri": "../application/getConversations",
+        "FunctionName": {
+          "Fn::Sub": "${StackName}-GetConversations"
+        },
+        "Events": {
+          "api": {
+            "Type": "Api",
+            "Properties": {
+              "Path": "/conversation",
+              "Method": "get",
+              "RestApiId": {
+                "Ref": "Api"
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "MessageTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": {
+          "Fn::Sub": "${StackName}-Messages"
+        },
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "chatbotId",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "channelId",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "createdAt",
+            "AttributeType": "N"
+          },
+          {
+            "AttributeName": "senderId",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "recipientId",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "status",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "language",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "type",
+            "AttributeType": "S"
+          }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "chatbotId",
+            "KeySchema": [
+              {
+                "AttributeName": "channelId",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "channelId",
+            "KeySchema": [
+              {
+                "AttributeName": "channelId",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "createdAt",
+            "KeySchema": [
+              {
+                "AttributeName": "createdAt",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "chatbotIdAndChannelId",
+            "KeySchema": [
+              {
+                "AttributeName": "chatbotId",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "channelId",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "senderId",
+            "KeySchema": [
+              {
+                "AttributeName": "senderId",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "recipientId",
+            "KeySchema": [
+              {
+                "AttributeName": "recipientId",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "status",
+            "KeySchema": [
+              {
+                "AttributeName": "status",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "language",
+            "KeySchema": [
+              {
+                "AttributeName": "language",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "type",
+            "KeySchema": [
+              {
+                "AttributeName": "type",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "channelIdAndCreatedAt",
+            "KeySchema": [
+              {
+                "AttributeName": "channelId",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "createdAt",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "chatbotIdAndCreatedAt",
+            "KeySchema": [
+              {
+                "AttributeName": "chatbotId",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "createdAt",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "ChatbotIdAndSenderId",
+            "KeySchema": [
+              {
+                "AttributeName": "chatbotId",
+                "KeyType": "HASH"
+              },
+              {
+                "AttributeName": "senderId",
+                "KeyType": "RANGE"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST"
+      }
+    },
+    "ConversationTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "TableName": {
+          "Fn::Sub": "${StackName}-Conversation"
+        },
+        "KeySchema": [
+          {
+            "AttributeName": "id",
+            "KeyType": "HASH"
+          }
+        ],
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "id",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "channel",
+            "AttributeType": "S"
+          },
+          {
+            "AttributeName": "lastMessage",
+            "AttributeType": "N"
+          }
+        ],
+        "GlobalSecondaryIndexes": [
+          {
+            "IndexName": "channel",
+            "KeySchema": [
+              {
+                "AttributeName": "channel",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "lastMessage",
+            "KeySchema": [
+              {
+                "AttributeName": "lastMessage",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          }
+        ],
+        "BillingMode": "PAY_PER_REQUEST"
+      }
+    }
+  }
+}
