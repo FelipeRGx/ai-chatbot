@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "react",
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "target": "es6",
+    "sourceMap": true,
+    "module": "esnext",
+    "skipLibCheck": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "moduleResolution": "node",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "lib": [
+      "dom",
+      "esnext",
+      "dom.iterable"
+    ],
+    "paths": {
+      "shared/*": [
+        "shared/*",
+        "app/src/*"
+      ]
+    }
+  },
+  "files": [
+    "core-api.d.ts"
+  ]
+}
